@@ -1,0 +1,28 @@
+# Python 运行时数据与缓存
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+
+# 本地凭据与运行日志（切勿提交真实账号信息）
+ulearning-cmd.local.json
+*.secret.json
+.env
+ulearning.log
+ulearning_history.json
+activity_diagnostic.json
+ulearning_selection_snapshot.json
+ulearning_interface_inventory.csv
+
+# 构建产物
+.buildozer/
+bin/
+build/
+dist/
+
+# IDE / 系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
