@@ -1,0 +1,10 @@
+{
+  "users": {
+    "your-account": {
+      "password": "",
+      "auth": "",
+      "userID": 0
+    }
+  },
+  "activeUser": "your-account"
+}
