@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "timeout": 30.0,
+  "retries": 3,
+  "backoff": 1.0,
+  "activity_page_size": 100,
+  "verify_delay": 1.5,
+  "history_file": "ulearning_history.json",
+  "default_location": "",
+  "default_coord_system": "gcj02",
+  "default_address": "",
+  "users": {
+    "your-account": {
+      "password": "",
+      "auth": "",
+      "userID": 0,
+      "roleId": 9,
+      "deviceInfo": " ulearning-cmd ",
+      "terminalId": "0123456789abcdef"
+    }
+  },
+  "activeUser": "your-account"
+}

@@ -1,0 +1,99 @@
+name: Build Qiandaoqi Android APK
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system build deps (libtool/libltdl-dev 等)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq autoconf automake autopoint libtool libtool-bin \
+            libltdl-dev libltdl7 libtool-doc pkg-config zip unzip
+          dpkg -l | grep -E "libtool|libltdl|autoconf" || true
+
+      # 双 JDK 策略：
+      #  - JDK 11：buildozer 自带的老版 cmdline-tools sdkmanager 只支持 <=11
+      #  - JDK 17：p4a 的 Gradle 8.14 + AGP 8.11 强制要求 17
+      # 先装 17 再装 11，最终 JAVA_HOME=11（sdkmanager 用），
+      # gradle 守护进程通过 ~/.gradle/gradle.properties 指向 JDK 17。
+      - name: Set up JDK 17 (gradle/AGP 8 需要)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up JDK 11 (buildozer sdkmanager 兼容，最终 JAVA_HOME)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "11"
+
+      - name: Point gradle daemon at JDK 17
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.java.home=$JAVA_HOME_17_X64" >> ~/.gradle/gradle.properties
+          cat ~/.gradle/gradle.properties
+          "$JAVA_HOME_17_X64/bin/java" -version
+
+      - name: Sanity check
+        run: |
+          ls -l icon.png presplash.jpg fonts/
+          python -m py_compile main.py test3.py
+
+      - name: Cache Android SDK/NDK (buildozer)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer/android/platform
+          key: ${{ runner.os }}-p4a-cache-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-p4a-cache-
+
+      - name: Install buildozer
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer cython==0.29.37 requests pillow
+          python -c "import test3; print('test3 core import OK')"
+
+      # p4a 会在目标 venv 里执行 `pip install -U pip`；pip 24.0 -> 26.2.1 会自损坏
+      # （ImportError: open_rich_spinner）。用约束文件把 pip 锁在 24.0，使其变成 no-op。
+      - name: Pin pip version for p4a venv
+        run: |
+          printf 'pip==24.0\n' | sudo tee /opt/pip-constraint.txt
+          cat /opt/pip-constraint.txt
+
+      - name: Build debug APK
+        env:
+          PIP_CONSTRAINT: /opt/pip-constraint.txt
+        run: buildozer -v android debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qiandaoqi-debug-apk
+          path: bin/*.apk
+          if-no-files-found: error
+
+      - name: Publish APK to debug Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug
+          name: 签到器 Debug APK
+          prerelease: true
+          files: bin/*.apk
