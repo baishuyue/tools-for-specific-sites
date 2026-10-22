@@ -15,6 +15,12 @@ activity_diagnostic.json
 ulearning_selection_snapshot.json
 ulearning_interface_inventory.csv
 
+# 运动世界一键跑步：本地运行产物
+last_submit.json
+config.json
+dryrun.json
+dryrun_cipher.b64
+
 # 构建产物
 .buildozer/
 bin/
