@@ -1,0 +1,24 @@
+# 本地配置：含账号密码，绝对不能提交
+config.json
+
+# 运行时产物
+state.json
+logs/
+*.log
+_tick.cmd
+.installed.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

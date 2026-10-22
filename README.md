@@ -10,6 +10,7 @@
 | [签到器](./签到器/) | 优学院课程 / 活动查询与签到助手，支持定位签到（多坐标系）、一键签到、监听模式 | 源码（Python）+ Windows 版 + Android 版 |
 | [优学院刷课脚本](./优学院刷课脚本/) | 优学院网页端油猴（Tampermonkey）脚本：自动静音播放、自动翻页、自动做练习题、倍速调节 | 油猴脚本（.user.js） |
 | [运动世界一键跑步](./运动世界一键跑步/) | 运动世界校园 App 一键跑步：生成合规 2km 轨迹、加密上传、自动提交并核验结果 | Windows（Python）+ 部署文档（依赖 MuMu 模拟器等第三方环境） |
+| [campus-netkeeper](./campus-netkeeper/) | 通用校园网自动认证与保活工具：自动发现 Portal、掉线重连、MAC 无感注册，零依赖零常驻 | Python 包（跨平台，含 Windows/Linux/macOS 部署脚本） |
 
 ## 目录结构
 
@@ -27,6 +28,11 @@
 │   ├── 一键跑步.bat
 │   ├── data/                  # 轨迹 / 报文模板（已脱敏）
 │   └── README.md              # 部署策略与精确到版本号的部署步骤
+├── campus-netkeeper/
+│   ├── netkeeper/             # 核心包（适配器 / 探测 / 状态机 / CLI）
+│   ├── deploy/                # Windows / Linux / macOS 部署脚本
+│   ├── main.py                # 便捷入口
+│   └── README.md              # 完整使用文档（中 / 英）
 ├── LICENSE
 └── README.md
 ```

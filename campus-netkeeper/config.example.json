@@ -1,0 +1,28 @@
+{
+  "_说明": "复制本文件为 config.json 后填写账号密码。portal_url 留空表示自动发现；campus_ip_prefixes / campus_ssids 留空表示不做额外限制（推荐）。",
+  "username": "",
+  "password": "",
+  "adapter": "auto",
+  "portal_url": "",
+  "campus_ip_prefixes": [],
+  "campus_ssids": [],
+  "auto_connect_wifi": false,
+  "interval": 120,
+  "keepalive_interval": 300,
+  "http_timeout": 8.0,
+  "base_backoff": 60,
+  "max_backoff": 900,
+  "enable_mac_auth": true,
+  "probe_urls": [
+    "http://connect.rom.miui.com/generate_204",
+    "http://wifi.vivo.com.cn/generate_204",
+    "http://connectivitycheck.platform.hicloud.com/generate_204",
+    "http://www.gstatic.com/generate_204"
+  ],
+  "fallback_query": "",
+  "adapter_options": {},
+  "log_dir": "logs",
+  "log_level": "INFO",
+  "log_keep_days": 14,
+  "state_file": "state.json"
+}
