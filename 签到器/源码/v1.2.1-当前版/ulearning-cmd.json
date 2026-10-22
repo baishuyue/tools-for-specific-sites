@@ -7,7 +7,7 @@
   "verify_delay": 1.5,
   "history_file": "ulearning_history.json",
   "default_location": "",
-  "default_coord_system": "gcj02",
+  "default_coord_system": "bd09",
   "default_address": "",
   "users": {
     "your-account": {

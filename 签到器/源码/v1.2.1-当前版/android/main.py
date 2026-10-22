@@ -3,13 +3,13 @@
 打包目标：Buildozer / python-for-android（GitHub Actions 在线构建）。
 桌面调试：pip install kivy requests && python main.py
 
-架构与原 APK 一致：
+架构说明：
     main.py(本文件, UI 层)  ->  test3.py(核心服务层, 原样复用, 未改动)
 
 UI 重制要点：
     - 现代卡片式布局、圆角按钮/彩色徽章/底部导航，替代原版平铺控件
     - 内置 NotoSansSC 可变字重字体，注册为默认字体，全组件中文无乱码
-    - 功能项与原 APK 完全对齐：登录(记住登录)/切换用户/课程加载/
+    - 功能项：登录(记住登录)/切换用户/课程加载/
       查询全部活动/查询选人/只看进行中/单条签到/对选中签到/一键签到/
       位置-坐标系-地址-签到码/诊断/选人详情/选人快照记录与对比/
       刷新课程/打开官方页面/日志查看与清空/状态条与结果弹窗
@@ -534,7 +534,7 @@ CONFIG_TEMPLATE = json.dumps(
         "verify_delay": 1.5,
         "history_file": "ulearning_history.json",
         "default_location": "",
-        "default_coord_system": "gcj02",
+        "default_coord_system": "bd09",
         "default_address": "",
     },
     ensure_ascii=False,
@@ -1129,7 +1129,7 @@ class MainScreen(Screen):
               size_hint_x=None, width=dp(60))
         )
         self.coord = mobile_spinner(
-            text="gcj02", values=("gcj02", "wgs84", "bd09"), size_hint_x=1
+            text="bd09", values=("gcj02", "wgs84", "bd09"), size_hint_x=1
         )
         coord_row.add_widget(self.coord)
         form.add_widget(coord_row)
@@ -1248,9 +1248,9 @@ class MainScreen(Screen):
             self.location.text = self.controller.session.config.default_location
         if not self.address.text.strip():
             self.address.text = self.controller.session.config.default_address
-        if self.coord.text == "gcj02":
+        if self.coord.text == "bd09":
             self.coord.text = (
-                self.controller.session.config.default_coord_system or "gcj02"
+                self.controller.session.config.default_coord_system or "bd09"
             )
         if not self._entered:
             self._entered = True
@@ -1582,7 +1582,7 @@ class MainScreen(Screen):
         return {
             "location": self.location.text.strip(),
             "address": self.address.text.strip(),
-            "coord_system": self.coord.text.strip() or "gcj02",
+            "coord_system": self.coord.text.strip() or "bd09",
             "attendance_code": self.attendance_code.text.strip(),
         }
 

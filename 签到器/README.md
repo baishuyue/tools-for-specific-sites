@@ -13,6 +13,8 @@
 | v1.1.0 工程化版 | 2026-09 下旬 | 源码 + 首个安卓 APK | 多坐标系（`gcj02`/`wgs84`/`bd09`）定位签到、`--dry-run` 演练与本地自检、Kivy 安卓壳（`android_app.py`）、Buildozer 打包、GitHub Actions 在线构建 APK |
 | v1.2.1 当前版 | 2026-10 | 源码 + Windows + Android | 定位签到完善、新增 [`一键签到.py`](./源码/v1.2.1-当前版/一键签到.py)（自动扫描 + 监听模式）、安卓 UI 全面重制（卡片式布局、内置中文字体、真实 GPS 定位读取） |
 
+> 坐标系口径：v1.1.0 及更早版本统一转换为 GCJ02 提交；v1.2.1 起确认优学院按**百度坐标系（BD09）**判定，程序改为统一转换为 BD09 提交，默认坐标系同步改为 `bd09`。
+
 各版本详细说明见对应目录：
 
 ```
@@ -50,11 +52,11 @@ python test3.py check --active-only --json
 
 # 预览签到请求（不提交）
 python test3.py signin --course-id <课程ID> --activity-id <活动ID> `
-  --location "113.879022,22.901269" --coord-system gcj02 --dry-run
+  --location "113.879022,22.901269" --coord-system bd09 --dry-run
 
 # 正式提交一次签到
 python test3.py signin --course-id <课程ID> --activity-id <活动ID> `
-  --location "113.879022,22.901269" --coord-system gcj02 --confirm
+  --location "113.879022,22.901269" --coord-system bd09 --confirm
 ```
 
 #### 一键签到（v1.2.1 新增）
@@ -91,7 +93,7 @@ python 一键签到.py --dry-run       # 只演练，不真正提交
 ## 定位签到与坐标系说明
 
 - 位置格式为 `经度,纬度`（注意顺序）；
-- GPS 常见输出是 `wgs84`，百度地图为 `bd09`，优学院网页端通常使用 `gcj02`；程序会自动完成正常转换与回读；
+- 优学院使用**百度坐标系（BD09）**：接口返回的教师中心点与签到提交均按 BD09 处理；百度地图输出的坐标可直接使用（`bd09`），系统 GPS 输出为 `wgs84`，高德/腾讯地图为 `gcj02`，程序会自动把所选坐标系的坐标统一转换为 BD09 后提交，并保留转换诊断；
 - 服务器会自行校验教师位置、签到半径、课堂 ID 与活动状态。出现"距离老师太远"时，应优先检查真实 GPS 精度、坐标系选择与课堂 ID，而不能通过客户端绕过服务端距离校验。
 
 ## 从源码构建 Android APK
@@ -122,10 +124,6 @@ buildozer -v android debug
 - 对已结束活动只生成补签请求分析，真正修改记录必须使用服务端单独签发的教师/管理员令牌并获得相应授权；
 - 请求失败时不会伪造本地成功状态；
 - 仓库内所有 `ulearning-cmd.json` 均为空白模板，请勿提交真实凭据、Cookie、日志或历史记录。
-
-## 开发过程文档
-
-- [`docs/APK逆向对比报告.md`](./docs/APK逆向对比报告.md)：v1.1.0 APK 与桌面版 `test3.py` 的逐层逆向对比（Buildozer 产物结构、pyc 常量提取、业务架构还原）。
 
 ## 免责声明
 

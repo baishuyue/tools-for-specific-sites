@@ -9,22 +9,20 @@ main.py                       移动端 UI（登录 / 课程 / 活动 / 签到 /
 test3.py                      核心服务层（与桌面版同一文件，MD5 一致，未改动）
 fonts/NotoSansSC-Regular.ttf  思源黑体常规（由可变字体实例化的静态字重）
 fonts/NotoSansSC-Bold.ttf     思源黑体粗体
-icon.png                      应用图标（沿用原 APK）
-presplash.jpg                 启动画面（沿用原 APK）
+icon.png                      应用图标
+presplash.jpg                 启动画面
 buildozer.spec                打包配置（Python 3.11 / Kivy 2.3.0 / 双 ABI）
 .github/workflows/            GitHub Actions 在线打包工作流
 push-and-build.bat            一键推送并触发构建（Windows）
 ```
 
-## 与原 APK 的关系
+## 工程说明
 
-原 APK（`ulearningdgut-1.1.0-debug`）是 `test3.py` + `android_app.py`（Kivy 壳）的 Buildozer 产物。
-本工程沿用同一打包路线，但：
+本工程由 `test3.py`（核心服务层）+ `main.py`（Kivy UI 层）组成，经 Buildozer 打包为安卓应用：
 
-- **UI 全面重制**：卡片式布局、圆角按钮、彩色状态徽章、底部导航，替代原版平铺控件
-- **字体换成静态字重**：原 APK 内嵌的 `NotoSansSC-VF.ttf` 是可变形字重，部分 SDL2_ttf 版本渲染时会崩溃；
-  已用 fonttools 实例化为 Regular/Bold 静态文件，兼容性更稳
-- **签到逻辑零改动**：`test3.py` 与原桌面版 MD5 完全相同
+- **UI**：卡片式布局、圆角按钮、彩色状态徽章、底部导航
+- **字体**：使用 NotoSansSC Regular/Bold 静态字重（由可变字体实例化），避免部分 SDL2_ttf 版本渲染可变字重时崩溃，兼容性更稳
+- **签到逻辑**：`test3.py` 与桌面版保持同一文件（MD5 一致），未改动
 
 ## 在线打包（推荐，本机无需 Java）
 

@@ -16,15 +16,15 @@ source.exclude_patterns = */tests/*,*/test/*,*/*_test.py,*/setup.py
 
 version = 1.2.1
 
-# 依赖：与原 APK 一致（Python 3.11 / Kivy 2.3.0 / requests）
+# 依赖（Python 3.11 / Kivy 2.3.0 / requests）
 # 注意：python-for-android 在 3.11 上会应用 CPython 官方补丁，兼容性最好
 requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.0,requests,urllib3,certifi,charset-normalizer,idna
 
-# 图标与启动画面（从原 APK 提取，保持一致）
+# 图标与启动画面
 icon.filename = %(source.dir)s/icon.png
 presplash.filename = %(source.dir)s/presplash.jpg
 
-# 竖屏、有窗口、最小 SDK 21（与原 APK 的 p4a_env_vars 一致）
+# 竖屏、有窗口、最小 SDK 21
 orientation = portrait
 fullscreen = 0
 android.archs = arm64-v8a, armeabi-v7a

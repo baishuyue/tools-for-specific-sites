@@ -122,7 +122,7 @@ class AppConfig:
     login_password: str = ""
     default_location: str = FIXED_LOCATION
     default_address: str = ""
-    default_coord_system: str = "gcj02"
+    default_coord_system: str = "bd09"
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +258,7 @@ _GCJ_A = 6378245.0
 _GCJ_EE = 0.00669342162296594323
 
 
-def _normalize_coord_system(value: Any, *, fallback: str = "gcj02") -> str:
+def _normalize_coord_system(value: Any, *, fallback: str = "bd09") -> str:
     normalized = str(value or "").strip().lower().replace("-", "")
     aliases = {
         "gcj": "gcj02",
@@ -1377,7 +1377,7 @@ class AttendanceService:
         classroom_id: str = "",
         location: str = "",
         address: str = "",
-        coord_system: str = "gcj02",
+        coord_system: str = "bd09",
         enter_way: int = 1,
         attendance_code: str = "",
         dry_run: bool = False,
@@ -2400,7 +2400,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--coord-system",
         choices=COORD_SYSTEMS,
         default="",
-        help="输入坐标系：gcj02(默认)、wgs84(GPS)、bd09(百度)",
+        help="输入坐标系：bd09(百度，默认)、wgs84(GPS)、gcj02(高德/腾讯)",
     )
     signin.add_argument("--attendance-code", default="", help="教师提供的签到码")
     signin.add_argument("--enter-way", type=int, default=1, help="进入方式，默认 1")
@@ -2442,7 +2442,7 @@ def launch_gui(config_path: Path) -> int:
             self.status_var = tk.StringVar(value="准备就绪")
             self.location_var = tk.StringVar()
             self.address_var = tk.StringVar()
-            self.coord_system_var = tk.StringVar(value="gcj02")
+            self.coord_system_var = tk.StringVar(value="bd09")
             self.attendance_code_var = tk.StringVar()
             self.pending_sign: tuple[Course, dict[str, Any], dict[str, str]] | None = None
             self.selection_snapshot: dict[str, Any] | None = None
@@ -2642,8 +2642,8 @@ def launch_gui(config_path: Path) -> int:
                 self.location_var.set(config.default_location)
             if not self.address_var.get().strip() and config.default_address:
                 self.address_var.set(config.default_address)
-            if self.coord_system_var.get().strip() == "gcj02":
-                self.coord_system_var.set(config.default_coord_system)
+            if self.coord_system_var.get().strip() == "bd09":
+                self.coord_system_var.set(config.default_coord_system or "bd09")
             self.attendance_service = AttendanceService(
                 client,
                 activity_service,
@@ -2982,7 +2982,7 @@ def launch_gui(config_path: Path) -> int:
             return {
                 "location": self.location_var.get().strip(),
                 "address": self.address_var.get().strip(),
-                "coord_system": self.coord_system_var.get().strip() or "gcj02",
+                "coord_system": self.coord_system_var.get().strip() or "bd09",
                 "attendance_code": self.attendance_code_var.get().strip(),
             }
 
