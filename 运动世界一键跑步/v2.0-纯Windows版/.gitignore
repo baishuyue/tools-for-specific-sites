@@ -1,0 +1,15 @@
+# 运行期在 exe 同目录生成，含账号信息，切勿提交
+config.json
+credentials.bin
+state.json
+dryrun.json
+dryrun_cipher.b64
+last_submit.json
+
+# 日志
+logs/
+*.log
+
+# Windows 杂项
+Thumbs.db
+desktop.ini
