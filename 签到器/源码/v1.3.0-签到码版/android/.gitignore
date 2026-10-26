@@ -1,0 +1,23 @@
+# 构建产物
+bin/
+build/
+buildozer.out
+.buildozer/
+
+# 本地凭据与会话（绝不提交）
+*.json.bak
+session.json
+ulearning_history.json
+ulearning_selection_snapshot.json
+ulearning-cmd.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
