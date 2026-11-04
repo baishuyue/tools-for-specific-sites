@@ -1,24 +1,32 @@
 # -*- coding: utf-8 -*-
-"""轨迹合成与结算报文构造（v3：面向"运动数据真实性"）。
+"""轨迹合成与结算报文构造（v3.1：对齐真实客户端的 27 字段轨迹点）。
 
-v2 的问题（被服务端判 `运动数据异常` 的直接原因）：
-  * 10 秒分桶按比例线性切分 → 距离标准差 0.005 m、步数 30/30/31…，真实传感器不可能这么整齐；
-  * 采样间隔固定 3 秒、accuracy 恒定 2.5–3.2、相邻位移 6.93 m 极均匀；
-  * speed 字段与 Δ距离/Δ时间 严格相等（真实客户端 speed 来自 GPS，有偏差）；
-  * 路径是 5 个打卡点的直线弦，形状过于规整。
+为什么必须对齐字段（2026-11-04 复盘）：
+    真实客户端上传的轨迹点长这样（27 个字段）：
+        gLat / gLng        GCJ-02 坐标（地图画绿线用的就是它）
+        lat / lng          -1.0（用 gcj02 时客户端就是这么写的）
+        gainTime           "YYYY-MM-DD HH:MM:SS"
+        type               0 普通 / 2 打卡点 / 5 起点 / 6 终点 / 7 停顿
+        radius             1.5–3.5（GPS 精度半径）
+        speed / avgSpeed   瞬时速度、滑动平均
+        totalDis / totalTime / validDis / validTime
+        id / flag / count / state / locType / coorType / queueNum / stepDistance / bd*
+    我们之前只发 {lat, lon, time, speed, accuracy, isValid}：
+        → App 读不到 gLat/gLng，地图上**没有绿色轨迹**；
+        → 服务端也解析不出有效轨迹，`reasonList` 出现 `运动数据异常`。
 
-v3 改法：
-  1. Chaikin 平滑 + 加密，路径变成带圆角的连续曲线；
-  2. 采样间隔随机（0.9–1.6s，8% 概率 GPS 丢点 3–9s）；
-  3. 插入 0–3 次真实停顿（8–45s，speed≈0，此时不产生距离/步数）；
-  4. 位置加相关噪声（低频摆动 + 每点抖动），accuracy 拉成真实分布（偶发 25–60m）；
-  5. speed 字段 = 位移/时间 × 噪声（0.94–1.06），与几何解耦；
-  6. 10 秒分桶按"实际分段长度 × 时间重叠"统计，不再比例切分，步数按移动时间 + 抖动分配；
-  7. 最终距离/时长/步数由几何反算，三者天然自洽，再由 policy.validate 复核。
+v3.1 生成策略：
+    * 路径 Chaikin 平滑 + 8m 加密，采样间隔随机 0.9–1.6s、8% 概率丢点 3–9s；
+    * 0–3 次真实停顿（8–45s，speed≈0，type=7）；
+    * 位置低频摆动 + 小抖动，radius 1.4–3.5（偶发 4–8）；
+    * speed 与几何解耦（±7%），偶发 GPS 速度尖峰；
+    * 10 秒分桶按"分段长度 × 时间重叠"统计，步数按移动时间分配后校正；
+    * 实际里程由几何反算，采样层迭代补偿，保证贴近目标。
 """
 from __future__ import annotations
 
 import base64
+import calendar
 import gzip
 import json
 import math
@@ -30,6 +38,16 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from . import protocol
 
 EARTH_R = 6371000.0
+TZ_OFFSET = 8 * 3600
+TIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+#: 真实客户端轨迹点字段（顺序无关，但必须齐全）
+CLIENT_POINT_KEYS = (
+    "avgSpeed", "bdA", "bdD", "bdG", "bdS", "coorType", "count", "dtr", "flag",
+    "gLat", "gLng", "gainTime", "id", "lat", "lng", "locType", "locationId",
+    "queueNum", "radius", "speed", "state", "stepDistance", "totalDis",
+    "totalTime", "type", "validDis", "validTime",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +99,6 @@ def build_route(points: Iterable[Sequence[float]]) -> List[Tuple[float, float]]:
 
 
 def smooth_ring(points: List[Tuple[float, float]], iterations: int = 2) -> List[Tuple[float, float]]:
-    """Chaikin 细分：把折线拐角磨圆，更像沿道路/跑道跑出来的线。"""
     pts = list(points)
     for _ in range(max(0, iterations)):
         out: List[Tuple[float, float]] = []
@@ -112,7 +129,7 @@ def _cumulative(points: List[Tuple[float, float]]) -> List[float]:
     for a, b in zip(points, points[1:]):
         cum.append(cum[-1] + distance(a, b))
     if len(points) > 1:
-        cum.append(cum[-1] + distance(points[-1], points[0]))   # 闭环最后一段
+        cum.append(cum[-1] + distance(points[-1], points[0]))
     return cum
 
 
@@ -142,8 +159,19 @@ def _jitter(pos: Tuple[float, float], meters: float, rng: random.Random) -> Tupl
     return pos[0] + dlat, pos[1] + dlon
 
 
+def _fmt_time(ms: float) -> str:
+    return time.strftime(TIME_FMT, time.gmtime(ms / 1000.0 + TZ_OFFSET))
+
+
+def parse_gain_time(text: str) -> int:
+    try:
+        return calendar.timegm(time.strptime(text, TIME_FMT)) - TZ_OFFSET
+    except Exception:
+        return 0
+
+
 # ---------------------------------------------------------------------------
-# 采样
+# 采样 → 客户端 27 字段点
 # ---------------------------------------------------------------------------
 @dataclass
 class TrackResult:
@@ -157,6 +185,8 @@ class TrackResult:
     speed_mps: float
     pause_s: float = 0.0
     notes: List[str] = field(default_factory=list)
+    times: List[float] = field(default_factory=list)
+    speeds: List[float] = field(default_factory=list)
 
     def describe(self) -> str:
         return "%dm / %ds / %s / %.2f m/s / 步数 %d / 停顿 %.0fs" % (
@@ -175,10 +205,94 @@ def _rng_opt(cfg: dict, key: str, default):
     return default
 
 
+def _to_client_points(samples: List[dict], start_ms: int, duration_s: int,
+                      rng: random.Random, checkpoints: Optional[List[dict]] = None) -> List[dict]:
+    """把内部采样点转成真实客户端的 27 字段结构。"""
+    points: List[dict] = []
+    total = 0.0
+    prev: Optional[dict] = None
+    base_id = rng.randint(8000, 30000)
+    speed_hist: List[float] = []
+
+    cps = []
+    for c in (checkpoints or []):
+        try:
+            cps.append((float(c.get("lat")), float(c.get("lng", c.get("lon")))))
+        except (TypeError, ValueError):
+            continue
+
+    # 每个打卡点只标记"最近的那一个采样点"，与真实客户端一致（5 个点 → 5 次 type=2）
+    cp_hits = set()
+    for cp in cps:
+        best_i, best_d = -1, 1e9
+        for i, sm in enumerate(samples):
+            d = distance((sm["lat"], sm["lon"]), cp)
+            if d < best_d:
+                best_i, best_d = i, d
+        if 0 <= best_i < len(samples) and best_d <= 60:
+            cp_hits.add(best_i)
+
+    for i, sm in enumerate(samples):
+        lat, lon = sm["lat"], sm["lon"]
+        if prev is not None:
+            total += distance((prev["gLat"], prev["gLng"]), (lat, lon))
+        v = float(sm.get("speed") or 0.0)
+        speed_hist.append(v)
+        window = speed_hist[-5:]
+        avg_v = sum(window) / len(window)
+
+        if i == 0:
+            ptype = 5
+        elif i == len(samples) - 1:
+            ptype = 6
+        elif sm.get("pause") or v < 0.3:
+            ptype = 7
+        elif i in cp_hits:
+            ptype = 2
+        else:
+            ptype = 0
+
+        pt = {
+            "avgSpeed": round(avg_v, 2),
+            "bdA": 0.0, "bdD": 0.0, "bdG": 1, "bdS": 0.0,
+            "coorType": "gcj02",
+            "count": 20,
+            "dtr": 0.0,
+            "flag": int(start_ms),
+            "gLat": round(lat, 7),
+            "gLng": round(lon, 7),
+            "gainTime": _fmt_time(start_ms + sm["time"] * 1000.0),
+            "id": base_id + i,
+            "lat": -1.0,
+            "lng": -1.0,
+            "locType": 1,
+            "locationId": "",
+            "queueNum": 4 if i > len(samples) * 0.4 else i % 4,
+            "radius": round(float(sm.get("radius") or 2.2), 2),
+            "speed": round(v, 2),
+            "state": 1,
+            "stepDistance": 0.0,
+            "totalDis": round(total, 3),
+            "totalTime": 0,
+            "type": ptype,
+            "validDis": round(total, 3),
+            "validTime": 0,
+        }
+        points.append(pt)
+        prev = pt
+
+    if points:
+        points[-1]["totalTime"] = int(duration_s)
+        points[-1]["validTime"] = int(duration_s)
+        points[-1]["totalDis"] = round(total, 3)
+        points[-1]["validDis"] = round(total, 3)
+    return points
+
+
 def _sample_once(route: Sequence[Sequence[float]], target_m: float, speed_mps: float,
                  start_ms: int, cadence: float, run_cfg: Optional[dict] = None,
-                 seed: Optional[int] = None) -> TrackResult:
-    """按"真实 GPS 轨迹"的方式采样：随机间隔、丢点、停顿、噪声、解耦 speed。"""
+                 seed: Optional[int] = None,
+                 checkpoints: Optional[List[dict]] = None) -> TrackResult:
     if target_m <= 0 or speed_mps <= 0:
         raise ValueError("里程与速度必须为正")
     rng = random.Random(seed if seed is not None else int(time.time() * 1000) & 0xFFFFFFFF)
@@ -188,8 +302,8 @@ def _sample_once(route: Sequence[Sequence[float]], target_m: float, speed_mps: f
     gap_prob = float(cfg.get("gps_gap_prob", 0.08))
     gap_s = _rng_opt(cfg, "gps_gap_s", (3.0, 9.0))
     noise_r = _rng_opt(cfg, "gps_noise_m", (1.5, 6.0))
-    acc_r = _rng_opt(cfg, "accuracy_range", (3.0, 45.0))
-    pause_prob = float(cfg.get("pause_prob", 0.75))
+    radius_r = _rng_opt(cfg, "radius_range", (1.4, 3.5))
+    pause_prob = float(cfg.get("pause_prob", 0.85))
     pause_s = _rng_opt(cfg, "pause_sec", (8.0, 45.0))
     speed_noise = float(cfg.get("speed_noise", 0.07))
 
@@ -198,28 +312,25 @@ def _sample_once(route: Sequence[Sequence[float]], target_m: float, speed_mps: f
     cum = _cumulative(ring)
     cycle = cum[-1]
 
-    # 停顿计划（按里程比例 15%–85% 之间随机放 0–3 次）
     n_pause = 0 if rng.random() > pause_prob else rng.randint(1, 3)
     pauses = sorted(rng.uniform(0.15, 0.85) for _ in range(n_pause))
 
     phase1, phase2 = rng.uniform(0, 2 * math.pi), rng.uniform(0, 2 * math.pi)
     k1, k2 = rng.uniform(0.8, 1.6), rng.uniform(2.4, 3.6)
 
-    pts: List[dict] = []
+    def radius() -> float:
+        if rng.random() < 0.05:
+            return round(rng.uniform(4.0, 8.0), 2)
+        return round(max(radius_r[0], min(radius_r[1], rng.gauss(2.2, 0.45))), 2)
+
+    samples: List[dict] = [{"lat": ring[0][0], "lon": ring[0][1], "time": 0.0,
+                            "speed": 0.0, "radius": radius(), "pause": True}]
     elapsed = 0.0
     traveled = 0.0
     pause_total = 0.0
     pause_idx = 0
-
-    def accuracy() -> float:
-        if rng.random() < 0.03:
-            return round(rng.uniform(max(20.0, acc_r[1] * 0.5), acc_r[1]), 1)
-        return round(max(acc_r[0], min(acc_r[1] * 0.45, rng.gauss(6.5, 2.6))), 1)
-
-    pts.append({"lat": round(ring[0][0], 7), "lon": round(ring[0][1], 7),
-                "time": int(start_ms), "speed": 0.0, "accuracy": accuracy(), "isValid": True})
-
     guard = 0
+
     while traveled < target_m - 1e-6:
         guard += 1
         if guard > 20000:
@@ -238,54 +349,54 @@ def _sample_once(route: Sequence[Sequence[float]], target_m: float, speed_mps: f
         pos = _place(ring, cum, traveled, cycle)
         bulge = noise_r[0] + (noise_r[1] - noise_r[0]) * (0.5 + 0.5 * math.sin(2 * math.pi * 0.7 * u + phase1))
         pos = _jitter(pos, max(0.0, bulge * 0.35 + rng.gauss(0, 0.35)), rng)
-        seg = distance((pts[-1]["lat"], pts[-1]["lon"]), pos) if traveled > 0 else step
+
+        seg = distance((samples[-1]["lat"], samples[-1]["lon"]), pos) if traveled > 0 else step
         field = seg / dt if dt > 0 else v
         field = max(0.0, min(6.0, field * (1 + rng.gauss(0, speed_noise))))
-        pts.append({"lat": round(pos[0], 7), "lon": round(pos[1], 7),
-                    "time": int(start_ms + elapsed * 1000), "speed": round(field, 2),
-                    "accuracy": accuracy(), "isValid": True})
+        if rng.random() < 0.02:
+            field = rng.uniform(8.0, 30.0)              # 真实 GPS 偶发速度尖峰
+        samples.append({"lat": pos[0], "lon": pos[1], "time": elapsed,
+                        "speed": field, "radius": radius(), "pause": False})
 
-        # 停顿：原地多个点，speed≈0，不产生距离
         if pause_idx < len(pauses) and u >= pauses[pause_idx] and traveled < target_m * 0.96:
             dur = rng.uniform(*pause_s)
             end_t = elapsed + dur
             while elapsed < end_t - 1e-6:
                 dd = min(end_t - elapsed, rng.uniform(2.0, 4.0))
                 elapsed += dd
-                pts.append({"lat": pts[-1]["lat"], "lon": pts[-1]["lon"],
-                            "time": int(start_ms + elapsed * 1000),
-                            "speed": round(max(0.0, rng.gauss(0.05, 0.05)), 2),
-                            "accuracy": accuracy(), "isValid": True})
+                samples.append({"lat": samples[-1]["lat"], "lon": samples[-1]["lon"],
+                                "time": elapsed,
+                                "speed": max(0.0, rng.gauss(0.05, 0.05)),
+                                "radius": radius(), "pause": True})
             pause_total += dur
             pause_idx += 1
 
-    # 收尾：末点精确落在目标距离处，时间取整
-    duration = int(round(elapsed))
-    pts[-1]["time"] = int(start_ms + duration * 1000)
-    for i in range(1, len(pts)):
-        if pts[i]["time"] <= pts[i - 1]["time"]:
-            pts[i]["time"] = pts[i - 1]["time"] + 1
-
-    actual = sum(distance((a["lat"], a["lon"]), (b["lat"], b["lon"])) for a, b in zip(pts, pts[1:]))
+    duration = max(1, int(round(elapsed)))
+    points = _to_client_points(samples, start_ms, duration, rng, checkpoints=checkpoints)
+    actual = sum(distance((a["gLat"], a["gLng"]), (b["gLat"], b["gLng"]))
+                 for a, b in zip(points, points[1:]))
     active = max(1.0, duration - pause_total)
     steps = int(round(active * cadence / 60.0))
     pace = duration / (actual / 1000.0) if actual > 0 else 0
-    return TrackResult(points=pts, path=ring, distance_m=actual, duration_s=duration,
+    return TrackResult(points=points, path=ring, distance_m=actual, duration_s=duration,
                        steps=max(1, steps), active_s=active, pace_sec=pace,
                        speed_mps=actual / max(1, duration), pause_s=pause_total,
-                       notes=["停顿 %d 次共 %.0fs" % (n_pause, pause_total)] if n_pause else [])
+                       notes=["停顿 %d 次共 %.0fs" % (n_pause, pause_total)] if n_pause else [],
+                       times=[sm["time"] for sm in samples],
+                       speeds=[sm["speed"] for sm in samples])
 
 
 def sample_track(route: Sequence[Sequence[float]], target_m: float, speed_mps: float,
                  start_ms: int, cadence: float, run_cfg: Optional[dict] = None,
-                 seed: Optional[int] = None, tolerance: float = 0.03) -> TrackResult:
-    """采样并在"噪声导致的里程偏差"上做补偿，保证实际里程贴近目标。"""
+                 seed: Optional[int] = None, tolerance: float = 0.03,
+                 checkpoints: Optional[List[dict]] = None) -> TrackResult:
+    """采样并按噪声导致的里程偏差做补偿，保证实际里程贴近目标。"""
     rng = random.Random(seed if seed is not None else int(time.time() * 1000) & 0xFFFFFFFF)
     target = float(target_m)
     best: Optional[TrackResult] = None
     for _ in range(5):
         tr = _sample_once(route, target, speed_mps, start_ms, cadence, run_cfg,
-                          seed=rng.randint(1, 10 ** 9))
+                          seed=rng.randint(1, 10 ** 9), checkpoints=checkpoints)
         err = (tr.distance_m - target_m) / max(1.0, target_m)
         if best is None or abs(err) < abs((best.distance_m - target_m) / max(1.0, target_m)):
             best = tr
@@ -296,35 +407,36 @@ def sample_track(route: Sequence[Sequence[float]], target_m: float, speed_mps: f
 
 
 # ---------------------------------------------------------------------------
-# 分桶（真实波动）
+# 分桶
 # ---------------------------------------------------------------------------
 def buckets(points: List[dict], duration_s: int, steps: int, start_ms: int,
             distance_m: float, rng: Optional[random.Random] = None) -> Tuple[List[dict], List[dict]]:
-    """按"实际分段长度 × 时间重叠"统计距离；步数按移动时间 + 抖动分配。"""
     rng = rng or random.Random()
     total_ms = max(1, duration_s * 1000)
     n = int(math.ceil(total_ms / 10000.0))
 
+    times = [parse_gain_time(p.get("gainTime", "")) * 1000 for p in points]
+    times = [t - start_ms if t else 0 for t in times]
+    for i in range(1, len(times)):
+        if times[i] <= times[i - 1]:
+            times[i] = times[i - 1] + 1
+
     dist_bins = [0.0] * n
     move_bins = [0.0] * n
-    for a, b in zip(points, points[1:]):
-        seg = distance((a["lat"], a["lon"]), (b["lat"], b["lon"]))
-        t0 = a["time"] - start_ms
-        t1 = b["time"] - start_ms
-        if t1 <= t0:
+    for i in range(len(points) - 1):
+        seg = distance((points[i]["gLat"], points[i]["gLng"]),
+                       (points[i + 1]["gLat"], points[i + 1]["gLng"]))
+        t0, t1 = times[i], times[i + 1]
+        if t1 <= t0 or seg <= 0.001:
             continue
-        if seg > 0.001:
-            # 把这一段长度按时间重叠摊到各桶
-            i0, i1 = int(t0 // 10000), min(n - 1, int((t1 - 1) // 10000))
-            for i in range(max(0, i0), i1 + 1):
-                lo = max(t0, i * 10000)
-                hi = min(t1, (i + 1) * 10000)
-                if hi > lo:
-                    share = (hi - lo) / (t1 - t0)
-                    dist_bins[i] += seg * share
-                    move_bins[i] += (hi - lo)
+        i0, i1 = int(t0 // 10000), min(n - 1, int((t1 - 1) // 10000))
+        for b in range(max(0, i0), i1 + 1):
+            lo, hi = max(t0, b * 10000), min(t1, (b + 1) * 10000)
+            if hi > lo:
+                share = (hi - lo) / (t1 - t0)
+                dist_bins[b] += seg * share
+                move_bins[b] += (hi - lo)
 
-    # 距离：整体缩放到与 totalDis 一致（误差来自浮点/末点对齐）
     tot = sum(dist_bins)
     if tot > 0:
         k = distance_m / tot
@@ -341,10 +453,9 @@ def buckets(points: List[dict], duration_s: int, steps: int, start_ms: int,
         if residual > 0:
             ints[i] += 1
             residual -= 1
-        else:
-            if ints[i] > 0 and move_bins[i] > 0:
-                ints[i] -= 1
-                residual += 1
+        elif ints[i] > 0 and move_bins[i] > 0:
+            ints[i] -= 1
+            residual += 1
         j += 1
         if j > 4 * n:
             break
@@ -466,8 +577,8 @@ def build_record(
         "getPrize": False,
         "goalId": 0,
         "isUpload": False,
-        "latitude": gps[0]["lat"],
-        "longitude": gps[0]["lon"],
+        "latitude": gps[0]["gLat"],
+        "longitude": gps[0]["gLng"],
         "maxRunTime": 0,
         "minSteps": 0,
         "originalSign": protocol.canonical(sign_map),
@@ -513,7 +624,7 @@ def build_record(
         "extension_json": gzip_b64(""),
         "laps_json": gzip_b64("[]"),
     }
-    hour = time.strftime("%Y%m%d%H", time.gmtime(start_ms / 1000.0 + 8 * 3600))
+    hour = time.strftime("%Y%m%d%H", time.gmtime(start_ms / 1000.0 + TZ_OFFSET))
     object_key = "run_data/%s/%s.json" % (hour, run_uuid)
     return body, obs_payload, object_key
 
@@ -536,31 +647,41 @@ def verify_track(gps: List[dict], distance_m: float, duration_s: int, start_ms: 
                  checkpoints: List[dict], tolerance_m: float = 30.0) -> dict:
     if len(gps) < 2:
         raise TrackCheck("轨迹点不足")
-    if gps[0]["time"] != start_ms:
-        raise TrackCheck("首点时间与 startTime 不一致")
-    if abs(gps[-1]["time"] - (start_ms + duration_s * 1000)) > 1000:
-        raise TrackCheck("末点时间与 stopTime 偏差过大")
-    for a, b in zip(gps, gps[1:]):
-        if b["time"] <= a["time"]:
-            raise TrackCheck("轨迹时间不是严格递增")
-    actual = sum(distance((a["lat"], a["lon"]), (b["lat"], b["lon"])) for a, b in zip(gps, gps[1:]))
+    if set(CLIENT_POINT_KEYS) - set(gps[0].keys()):
+        raise TrackCheck("轨迹点字段缺失：%s" % sorted(set(CLIENT_POINT_KEYS) - set(gps[0].keys())))
+    t0 = parse_gain_time(gps[0]["gainTime"])
+    t1 = parse_gain_time(gps[-1]["gainTime"])
+    if abs(t0 - start_ms / 1000.0) > 2:
+        raise TrackCheck("首点 gainTime 与 startTime 不一致")
+    if abs(t1 - (start_ms + duration_s * 1000) / 1000.0) > 2:
+        raise TrackCheck("末点 gainTime 与 stopTime 不一致")
+    prev = t0
+    for p in gps[1:]:
+        cur = parse_gain_time(p["gainTime"])
+        if cur < prev:
+            raise TrackCheck("gainTime 倒退")
+        prev = cur
+    actual = sum(distance((a["gLat"], a["gLng"]), (b["gLat"], b["gLng"]))
+                 for a, b in zip(gps, gps[1:]))
     if abs(actual - distance_m) > max(3.0, distance_m * 0.005):
         raise TrackCheck("轨迹里程 %.1fm 与 totalDis %dm 偏差过大" % (actual, distance_m))
     missing = []
     for cp in checkpoints:
         target = (cp.get("lat"), cp.get("lng", cp.get("lon")))
-        if not any(distance((p["lat"], p["lon"]), target) <= tolerance_m for p in gps):
+        if not any(distance((p["gLat"], p["gLng"]), target) <= tolerance_m for p in gps):
             missing.append(cp.get("pointName") or cp.get("name") or target)
     pace = duration_s / (actual / 1000.0) if actual > 0 else 0
     speeds = [p["speed"] for p in gps if p["speed"] > 0]
+    mean = sum(speeds) / len(speeds) if speeds else 0
     return {
         "points": len(gps),
         "distance_m": round(actual, 1),
         "pace_sec_per_km": round(pace, 1),
         "speed_mps": round(actual / duration_s, 3),
         "missing_checkpoints": missing,
-        "speed_mean": round(sum(speeds) / len(speeds), 2) if speeds else 0,
-        "speed_stdev": round((sum((s - sum(speeds) / len(speeds)) ** 2 for s in speeds) / len(speeds)) ** 0.5, 3) if speeds else 0,
+        "speed_mean": round(mean, 2),
+        "speed_stdev": round((sum((s - mean) ** 2 for s in speeds) / len(speeds)) ** 0.5, 3) if speeds else 0,
+        "types": {t: sum(1 for p in gps if p["type"] == t) for t in (0, 2, 5, 6, 7)},
     }
 
 

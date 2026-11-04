@@ -503,7 +503,8 @@ class Runner:
             cand = track.sample_track(route_pts, plan["distance_m"], rp.speed_mps if rp else 2.5,
                                       start_ms=0, cadence=rp.cadence if rp else 170,
                                       run_cfg=self.run_cfg,
-                                      seed=random.Random().randint(1, 10 ** 9))
+                                      seed=random.Random().randint(1, 10 ** 9),
+                                      checkpoints=plan["checkpoints"])
             cand_plan = policy.RunPlan(
                 distance_m=int(round(cand.distance_m)), duration_s=cand.duration_s,
                 steps=cand.steps, pace_sec=cand.pace_sec,
@@ -518,18 +519,24 @@ class Runner:
             raise SportError("轨迹无法满足合规区间：%s" % "；".join(issues), -24)
 
         start_ms = stop_ms - tr.duration_s * 1000
-        for p in tr.points:
-            p["time"] += start_ms
+        # 采样时 start_ms=0，这里把 gainTime / flag 平移到真实开始时刻
+        for pt in tr.points:
+            pt["gainTime"] = track._fmt_time(track.parse_gain_time(pt["gainTime"]) * 1000 + start_ms)
+            pt["flag"] = int(start_ms)
         gps = tr.points
         vertices = tr.path
         steps = tr.steps
         self.log("   本次参数：%s；停顿 %.0fs（结束时刻前移 %ds）" % (
             tr.describe(), tr.pause_s, offset))
-        self.log("   轨迹特征：点数 %d，采样间隔中位 %.1fs，速度 std=%.2f，accuracy %.1f–%.1f" % (
-            len(gps),
-            sorted([(b["time"] - a["time"]) / 1000.0 for a, b in zip(gps, gps[1:])])[len(gps) // 2] if len(gps) > 2 else 0,
-            (sum((p["speed"] - sum(q["speed"] for q in gps) / len(gps)) ** 2 for p in gps) / len(gps)) ** 0.5,
-            min(p["accuracy"] for p in gps), max(p["accuracy"] for p in gps)))
+        _ints = sorted((track.parse_gain_time(b["gainTime"]) - track.parse_gain_time(a["gainTime"]))
+                       for a, b in zip(gps, gps[1:]))
+        _sp = [p["speed"] for p in gps]
+        _mean = sum(_sp) / len(_sp)
+        self.log("   轨迹特征：%d 点 / 采样间隔中位 %.0fs / speed σ=%.2f / radius %.2f–%.2f / 类型 %s" % (
+            len(gps), _ints[len(_ints) // 2] if _ints else 0,
+            (sum((x - _mean) ** 2 for x in _sp) / len(_sp)) ** 0.5,
+            min(p["radius"] for p in gps), max(p["radius"] for p in gps),
+            sorted({p["type"] for p in gps})))
         check = track.verify_track(gps, tr.distance_m, tr.duration_s, start_ms,
                                    plan["checkpoints"])
         warnings = []

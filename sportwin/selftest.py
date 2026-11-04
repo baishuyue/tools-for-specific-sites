@@ -183,22 +183,27 @@ def run() -> bool:
     print("2) 轨迹合成（v3：真实采样/停顿/噪声）")
     ring = [(22.9057 + 0.0016 * math.cos(2 * math.pi * i / 12),
              113.8746 + 0.0016 * math.sin(2 * math.pi * i / 12)) for i in range(12)]
+    cps_pre = [{"lat": ring[i % len(ring)][0], "lng": ring[i % len(ring)][1]} for i in range(5)]
     tr = track.sample_track(track.build_route(ring), 2100, 2.6, 0, 172,
-                            run_cfg=json.loads(json.dumps(store.DEFAULT_CONFIG["run"])))
+                            run_cfg=json.loads(json.dumps(store.DEFAULT_CONFIG["run"])),
+                            checkpoints=cps_pre)
     gps = tr.points
     check("采样点数量", 200 < len(gps) < 4000, len(gps))
-    check("首点时间", gps[0]["time"] == 0)
-    check("末点时间", abs(gps[-1]["time"] - tr.duration_s * 1000) <= 1000,
-          "%s vs %s" % (gps[-1]["time"], tr.duration_s * 1000))
-    check("时间严格递增", all(b["time"] > a["time"] for a, b in zip(gps, gps[1:])))
-    actual = sum(track.distance((a["lat"], a["lon"]), (b["lat"], b["lon"])) for a, b in zip(gps, gps[1:]))
+    check("字段齐全(27 项)", not (set(track.CLIENT_POINT_KEYS) - set(gps[0].keys())),
+          sorted(set(track.CLIENT_POINT_KEYS) - set(gps[0].keys())) or "完整")
+    check("首点 gainTime", track.parse_gain_time(gps[0]["gainTime"]) == 0)
+    check("末点 gainTime", abs(track.parse_gain_time(gps[-1]["gainTime"]) - tr.duration_s) <= 2,
+          "%s vs %s" % (track.parse_gain_time(gps[-1]["gainTime"]), tr.duration_s))
+    check("gLat/gLng 有效", all(p["gLat"] > 0 and p["gLng"] > 0 for p in gps))
+    check("lat/lng = -1（gcj02 约定）", all(p["lat"] == -1.0 and p["lng"] == -1.0 for p in gps))
+    check("type 含起终点/打卡点", all(t in {p["type"] for p in gps} for t in (5, 6)),
+          str({p["type"] for p in gps}))
+    actual = sum(track.distance((a["gLat"], a["gLng"]), (b["gLat"], b["gLng"])) for a, b in zip(gps, gps[1:]))
     check("几何与 totalDis 一致", abs(actual - tr.distance_m) < 3, "%.1fm" % actual)
     check("里程接近目标", abs(tr.distance_m - 2100) / 2100 < 0.05, "%.1fm" % tr.distance_m)
-    check("采样间隔不固定",
-          len({(b["time"] - a["time"]) for a, b in zip(gps, gps[1:])}) > 20,
-          len({(b["time"] - a["time"]) for a, b in zip(gps, gps[1:])}))
-    check("accuracy 有真实分布", max(p["accuracy"] for p in gps) - min(p["accuracy"] for p in gps) > 3,
-          "%.1f–%.1f" % (min(p["accuracy"] for p in gps), max(p["accuracy"] for p in gps)))
+    check("radius 有真实分布", max(p["radius"] for p in gps) - min(p["radius"] for p in gps) > 0.8,
+          "%.2f–%.2f" % (min(p["radius"] for p in gps), max(p["radius"] for p in gps)))
+    check("totalDis 递增", all(b["totalDis"] >= a["totalDis"] for a, b in zip(gps, gps[1:])))
 
     print("3) 报文与签名（含 10 秒分桶真实性）")
     cps = [{"lat": ring[i % len(ring)][0], "lng": ring[i % len(ring)][1],
@@ -208,6 +213,7 @@ def run() -> bool:
         distance_m=int(round(tr.distance_m)), duration_s=tr.duration_s, steps=tr.steps,
         start_ms=0, stop_ms=tr.duration_s * 1000, gps=gps,
         checkpoints=cps, route_vertices=tr.path, sel_distance=2000, sel_runtime=600, seed=7)
+    check("allLocJson 为 27 字段", set(json.loads(body["allLocJson"])[0].keys()) == set(track.CLIENT_POINT_KEYS))
     check("signature 32 位", len(body["signature"]) == 32, body["signature"])
     check("originalSign 31 字段", body["originalSign"].count("&") == 30,
           body["originalSign"].count("&") + 1)

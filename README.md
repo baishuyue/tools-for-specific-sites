@@ -293,6 +293,30 @@ LICENSE           MIT（含第三方组件声明）
 想更保守：`pace_range_sec_per_km` 调到 `[390, 450]`（6'30"–7'30"/km）、`distance_range_m` 调到 `[2000, 2100]`、
 `max_runs_per_day` 保持 1，隔天跑一次。
 
+## 5.97 地图上没有绿色轨迹？（v3.1 已修）
+
+App 里合法记录能看到全程绿线，我们的记录没有 —— 因为**轨迹点字段结构不对**。
+
+真实客户端的轨迹点有 **27 个字段**，地图层读的是 `gLat/gLng`（GCJ-02），而我们之前只发了
+`{lat, lon, time, speed, accuracy, isValid}` 六个字段：渲染器取不到 `gLat/gLng`，自然画不出线；
+服务端同样解析不出轨迹，于是给出 `运动数据异常`。
+
+v3.1 起完全按真实结构生成（示例）：
+
+```json
+{"avgSpeed":2.61,"bdA":0.0,"bdD":0.0,"bdG":1,"bdS":0.0,"coorType":"gcj02",
+ "count":20,"dtr":0.0,"flag":1793790000000,"gLat":22.9072196,"gLng":113.8749,
+ "gainTime":"2026-11-04 19:20:03","id":25781,"lat":-1.0,"lng":-1.0,"locType":1,
+ "locationId":"","queueNum":0,"radius":2.24,"speed":2.61,"state":1,
+ "stepDistance":0.0,"totalDis":12.4,"totalTime":0,"type":5,"validDis":12.4,"validTime":0}
+```
+
+要点：
+- `gLat/gLng` 才是坐标，`lat/lng` 固定 `-1.0`（客户端 gcj02 就这约定）；
+- `gainTime` 是秒级字符串，不是毫秒；
+- `type`：5 起点 / 0 普通 / 2 打卡点（只标 5 个）/ 7 停顿 / 6 终点；
+- `totalDis` 逐点累加；末点才写 `totalTime/validTime`。
+
 ## 6. 排障
 
 | 现象 | 处理 |
