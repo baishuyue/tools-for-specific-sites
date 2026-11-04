@@ -1,0 +1,18 @@
+# 本地运行时数据（绝不提交）
+config.json
+credentials.bin
+state.json
+dryrun.json
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.spec
+
+# 打包产物
+*.exe

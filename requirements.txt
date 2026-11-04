@@ -1,0 +1,5 @@
+# 运行期只依赖 Python 标准库（AES/RSA/KDF/MD5/gzip/HTTP 全部内置）。
+# 下面这些是可选的开发辅助，不是运行必需：
+#
+#   pyinstaller>=6.0     # 仅打包 一键跑步.exe 时需要
+#   pycryptodome>=3.20   # 仅 selftest 交叉校验 AES 时使用（不装也能跑）
