@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from . import policy, store, track
+from . import geo, policy, store, track
 from .client import SportClient, SportError, as_list
 
 
@@ -340,6 +340,25 @@ class Runner:
             anchor = anchor_of(fences, area_id) or (0.0, 0.0)
             route_pts = circle_ring(anchor[0], anchor[1])
             self.log("路线：围栏不可用，使用默认环形路线")
+
+        # 坐标系判定：接口下发的打卡点可能是 WGS-84，而地图（gLat/gLng）要 GCJ-02。
+        # 拿围栏多边形比一下：原样在内说明已是 GCJ；转一下才在内说明是 WGS。
+        fence_poly = []
+        for f in fences or []:
+            fence_poly = geo.polygon(f.get("points") or [], ("glat", "glon"))
+            if len(fence_poly) >= 3:
+                break
+        mode = geo.detect(checkpoints, fence_poly)
+        checkpoints_geo = checkpoints
+        if mode in ("bd09", "wgs"):
+            checkpoints_geo = geo.convert_points(checkpoints, mode)
+            route_pts = [(c["lat"], c["lng"]) for c in checkpoints_geo]
+            self.log("   坐标系：%s → 已转换为 GCJ-02（围栏 %d 点；不转地图会偏移约 900m，画不出绿线）"
+                     % ("BD-09(百度)" if mode == "bd09" else "WGS-84", len(fence_poly)))
+        elif mode == "gcj":
+            self.log("   坐标系：GCJ-02（与围栏一致，无需转换）")
+        else:
+            self.log("   坐标系：无法判定（围栏 %d 点），按原样使用" % len(fence_poly))
         return {
             "rule": rule,
             "limits": limits,
@@ -349,6 +368,8 @@ class Runner:
             "duration_s": duration,
             "area_id": area_id,
             "checkpoints": checkpoints,
+            "checkpoints_geo": checkpoints_geo,
+            "coord_mode": mode,
             "route": route_pts,
             "policy": rule["policy"],
         }
@@ -538,7 +559,7 @@ class Runner:
             min(p["radius"] for p in gps), max(p["radius"] for p in gps),
             sorted({p["type"] for p in gps})))
         check = track.verify_track(gps, tr.distance_m, tr.duration_s, start_ms,
-                                   plan["checkpoints"])
+                                   plan.get("checkpoints_geo") or plan["checkpoints"])
         warnings = []
         if check["missing_checkpoints"]:
             warnings.append("未覆盖打卡点: %s" % check["missing_checkpoints"])

@@ -16,7 +16,7 @@ import uuid
 
 import random as _random
 
-from . import policy, protocol, store, track
+from . import geo, policy, protocol, store, track
 from .runner import Report, Runner
 
 
@@ -227,6 +227,26 @@ def run() -> bool:
     check("分桶步数有波动", len(set(bs)) >= 5, "%d 种" % len(set(bs)))
     check("OBS 11 键", len(obs) == 11, len(obs))
     check("对象 key 结构", key.startswith("run_data/") and key.endswith(".json"))
+
+    print("3.5) 坐标系判定（GCJ / WGS / BD-09）")
+    center = (22.905785, 113.874670)
+    poly = geo.polygon([{"glat": center[0] + 0.004 * math.cos(2 * math.pi * i / 8),
+                         "glon": center[1] + 0.004 * math.sin(2 * math.pi * i / 8)} for i in range(8)])
+    gcj_cps = [{"lat": center[0] + 0.001 * math.cos(2 * math.pi * i / 5),
+                "lng": center[1] + 0.001 * math.sin(2 * math.pi * i / 5)} for i in range(5)]
+    bd_cps = [{"lat": geo.gcj_to_bd09(c["lat"], c["lng"])[0],
+               "lng": geo.gcj_to_bd09(c["lat"], c["lng"])[1]} for c in gcj_cps]
+    wgs_cps = [{"lat": geo.gcj2wgs(c["lat"], c["lng"])[0],
+                "lng": geo.gcj2wgs(c["lat"], c["lng"])[1]} for c in gcj_cps]
+    check("GCJ 输入识别为 gcj", geo.detect(gcj_cps, poly) == "gcj")
+    check("BD-09 输入识别为 bd09", geo.detect(bd_cps, poly) == "bd09")
+    check("WGS 输入识别为 wgs", geo.detect(wgs_cps, poly) == "wgs")
+    conv = geo.convert_points(bd_cps, "bd09")
+    d = math.hypot((conv[0]["lat"] - gcj_cps[0]["lat"]) * 111000,
+                   (conv[0]["lng"] - gcj_cps[0]["lng"]) * 97000)
+    check("BD-09→GCJ 残差 < 5m", d < 5, "%.2fm" % d)
+    check("转换后全部落在围栏内",
+          all(geo.point_in_polygon(p["lat"], p["lng"], poly) for p in conv))
 
     print("4) 合规随机（里程/配速/步频每次都不同且合法）")
     for label, rule in (
