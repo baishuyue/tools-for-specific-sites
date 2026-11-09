@@ -13,5 +13,5 @@
     cli       命令行
     gui       Tkinter 界面
 """
-__version__ = "3.2.0"
+__version__ = "3.2.1"
 __all__ = ["protocol", "client", "store", "track", "runner", "auth", "cli", "gui"]
