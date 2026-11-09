@@ -389,20 +389,27 @@ def _sample_once(route: Sequence[Sequence[float]], target_m: float, speed_mps: f
 def sample_track(route: Sequence[Sequence[float]], target_m: float, speed_mps: float,
                  start_ms: int, cadence: float, run_cfg: Optional[dict] = None,
                  seed: Optional[int] = None, tolerance: float = 0.03,
-                 checkpoints: Optional[List[dict]] = None) -> TrackResult:
-    """采样并按噪声导致的里程偏差做补偿，保证实际里程贴近目标。"""
+                 checkpoints: Optional[List[dict]] = None,
+                 min_duration: float = 0.0) -> TrackResult:
+    """采样并按噪声/停顿导致的偏差做补偿：里程贴目标，时长不低于校规下限。"""
     rng = random.Random(seed if seed is not None else int(time.time() * 1000) & 0xFFFFFFFF)
     target = float(target_m)
+    speed = float(speed_mps)
     best: Optional[TrackResult] = None
-    for _ in range(5):
-        tr = _sample_once(route, target, speed_mps, start_ms, cadence, run_cfg,
+    best_score = None
+    for _ in range(6):
+        tr = _sample_once(route, target, speed, start_ms, cadence, run_cfg,
                           seed=rng.randint(1, 10 ** 9), checkpoints=checkpoints)
-        err = (tr.distance_m - target_m) / max(1.0, target_m)
-        if best is None or abs(err) < abs((best.distance_m - target_m) / max(1.0, target_m)):
-            best = tr
-        if abs(err) <= tolerance:
+        err = abs((tr.distance_m - target_m) / max(1.0, target_m))
+        short = max(0.0, (min_duration - tr.duration_s) / max(1.0, min_duration)) if min_duration else 0.0
+        score = err + short
+        if best_score is None or score < best_score:
+            best, best_score = tr, score
+        if err <= tolerance and short <= 0:
             return tr
-        target *= target_m / max(1.0, tr.distance_m)
+        target *= target_m / max(1.0, tr.distance_m)          # 里程补偿
+        if short > 0:                                          # 时长不够 → 降速拉长
+            speed = max(0.8, speed * max(0.80, tr.duration_s / max(1.0, min_duration)))
     return best
 
 

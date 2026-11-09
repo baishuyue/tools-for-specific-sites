@@ -520,12 +520,14 @@ class Runner:
         tr = None
         actual = None
         issues = []
-        for attempt in range(4):
-            cand = track.sample_track(route_pts, plan["distance_m"], rp.speed_mps if rp else 2.5,
+        target_m = float(plan["distance_m"])
+        for attempt in range(6):
+            cand = track.sample_track(route_pts, target_m, rp.speed_mps if rp else 2.5,
                                       start_ms=0, cadence=rp.cadence if rp else 170,
                                       run_cfg=self.run_cfg,
                                       seed=random.Random().randint(1, 10 ** 9),
-                                      checkpoints=plan["checkpoints"])
+                                      checkpoints=plan["checkpoints"],
+                                      min_duration=float((limits.min_run_time if limits else 0) or 0))
             cand_plan = policy.RunPlan(
                 distance_m=int(round(cand.distance_m)), duration_s=cand.duration_s,
                 steps=cand.steps, pace_sec=cand.pace_sec,
@@ -535,7 +537,13 @@ class Runner:
             tr, actual = cand, cand_plan
             if not issues:
                 break
-            self.log("   [重采样 %d] %s" % (attempt + 1, "；".join(issues)))
+            # 按失败原因调整下一次的目标里程（速度偏低→加长；时长不足→加长）
+            if any("速度" in i for i in issues) and cand.speed_mps > 0 and limits:
+                target_m *= max(1.02, (limits.speed_min / cand.speed_mps) * 1.03)
+            else:
+                target_m *= 1.05
+            self.log("   [重采样 %d] %s → 目标里程调整为 %.0fm" % (
+                attempt + 1, "；".join(issues), target_m))
         if issues:
             raise SportError("轨迹无法满足合规区间：%s" % "；".join(issues), -24)
 
