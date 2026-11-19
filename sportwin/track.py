@@ -511,12 +511,17 @@ def build_record(
     fences_raw: Optional[list] = None,
     calorie: Optional[int] = None,
     avg_power: Optional[int] = None,
+    active_s: Optional[float] = None,
     seed: Optional[int] = None,
 ) -> Tuple[dict, dict, str]:
+    km = distance_m / 1000.0
     avg_step = round(steps * 60.0 / duration_s) if duration_s else 165
-    speed_val = round(distance_m / duration_s * 1000) if duration_s else 2600
-    calorie = calorie if calorie is not None else max(1, int(distance_m / 1000.0 * 62))
-    avg_power = avg_power if avg_power is not None else int(120 + distance_m / 1000.0 * 12)
+    # 真实抓包口径：speed = 里程 / **移动时间** ×1000（停顿不计），
+    # avgStepFreq = 步数 / 总时长 ×60；avgPower ≈ 128.6/km；calorie ≈ 57.8/km
+    moving = float(active_s) if active_s and active_s > 0 else float(duration_s or 1)
+    speed_val = round(distance_m / max(1.0, moving) * 1000)
+    calorie = calorie if calorie is not None else max(1, int(round(km * 57.8)))
+    avg_power = avg_power if avg_power is not None else int(round(km * 128.6))
     complete = distance_m >= sel_distance and duration_s >= sel_runtime
     reason = 0 if complete else 10
 

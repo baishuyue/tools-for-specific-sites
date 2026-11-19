@@ -599,6 +599,7 @@ class Runner:
             stop_ms=start_ms + tr.duration_s * 1000,
             gps=gps, checkpoints=cps_payload, route_vertices=vertices,
             address=str(self.run_cfg.get("address") or ""),
+            active_s=tr.active_s,
             sel_distance=max(plan["rule"]["min_distance"], 1000),
             sel_runtime=plan["rule"]["min_run_time"], policy=plan["policy"],
             run_area_id=plan["area_id"], fences_raw=fences,
