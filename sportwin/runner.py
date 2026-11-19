@@ -579,12 +579,26 @@ class Runner:
         for w in warnings:
             self.log("   [警告] " + w)
 
+        cps_payload = []
+        geo_cps = plan.get("checkpoints_geo") or plan["checkpoints"]
+        for _i, _c in enumerate(plan["checkpoints"]):
+            _g = geo_cps[_i]
+            cps_payload.append({
+                "id": _c.get("id") or 0,
+                "lat": _c.get("lat"), "lon": _c.get("lng", _c.get("lon")),
+                "glat": _g.get("lat"), "glon": _g.get("lng", _g.get("lon")),
+                "pointName": _c.get("pointName") or _c.get("name"),
+                "position": _i,
+                "isFixed": int(_c.get("isFixed") or 0),
+                "flag": int(start_ms),
+            })
         body, obs_payload, object_key = track.build_record(
             uid=int(me["uid"]), unid=int(me.get("unid") or 0), run_uuid=run_uuid,
             sport_type=plan["sport_type"], distance_m=int(round(tr.distance_m)),
             duration_s=tr.duration_s, steps=steps, start_ms=start_ms,
             stop_ms=start_ms + tr.duration_s * 1000,
-            gps=gps, checkpoints=plan["checkpoints"], route_vertices=vertices,
+            gps=gps, checkpoints=cps_payload, route_vertices=vertices,
+            address=str(self.run_cfg.get("address") or ""),
             sel_distance=max(plan["rule"]["min_distance"], 1000),
             sel_runtime=plan["rule"]["min_run_time"], policy=plan["policy"],
             run_area_id=plan["area_id"], fences_raw=fences,

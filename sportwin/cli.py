@@ -308,6 +308,9 @@ def cmd_selftest(args, log) -> int:
 
 
 def cmd_task(args, log) -> int:
+    if os.name != "nt":
+        print("计划任务目前仅支持 Windows；Linux 请使用 systemd --user 或 cron。")
+        return 2
     py = sys.executable
     script = str(store.BASE_DIR / "sport_run.py")
     name = "SportWorldAutoRun"

@@ -1,5 +1,39 @@
 # 变更记录
 
+## v3.3.0 — 报文参数对齐真实抓包（针对"APP参数数据异常105"）
+
+**依据**：2026-11-04 07:32 人工复核结论 `APP参数数据异常105`（审核人：运动世界超级管理员）。
+把我们的 save/record 报文与真实抓包（`data/save_2264_body.json`）逐字段比对，发现 7 处结构性差异：
+
+| 字段 | 真实抓包 | v3.2（我们） | 处理 |
+|---|---|---|---|
+| `more` | `true` | **缺失** | 补上 |
+| `recordUrl` | 不存在 | 多余 | 删除 |
+| `allLocJson` | `""`（轨迹只走 OBS） | 整段数组 | 置空 |
+| `speedPerTenSec` | `[]` | 86 个桶 | 置空（数据在 OBS `speed_json`） |
+| `stepsPerTenSec` | `[]` | 86 个桶 | 置空（数据在 OBS `step_freq_json`） |
+| `segmentJson` | `""` | `"[]"` | 改为空串 |
+| `latitude`/`longitude` | `0.0` / `0.0` | 首点真实坐标 | 改为 0.0 |
+
+**打卡点结构（fivePointJson 内层）**：真实为 **11 字段**，我们只有 9 个且缺 GCJ 坐标：
+
+```json
+{"flag":1791871926902,"glat":22.905785,"glon":113.87467,"id":116,"isFixed":0,
+ "isPass":true,"lat":22.912111,"lon":113.881091,"pointName":"22号田径场5号点（一）备用",
+ "position":0,"state":0}
+```
+
+- 补 `flag`（本次开始时间）、`glat/glon`（GCJ-02）、`state`；
+- 键名 `lng` → `lon`；
+- `position` 从 0 开始（原来 1 开始）；
+- `isFixed` 默认 0（原来固定 1）。
+
+**请求头**：补齐真实客户端的设备参数（`IMEI`/`androidId`/`blMac`/`wifiMac`/
+`CustomDeviceId`/`appInstallTime`/`appUpdateTime`），避免"APP 参数"被判异常。
+
+**验证**：离线生成报文与真实抓包对比 —— **45 字段、无缺失、无多余、无类型差异**；
+`selftest` 新增 body 空轨迹/分桶、`more`/`recordUrl`、经纬度 0、OBS 27 字段、打卡点 11 字段等断言。
+
 ## v3.2.0 — 坐标系修正（BD-09 → GCJ-02），修复"地图没有绿线"
 
 **现象**：v3.1 字段已对齐 27 项，记录也被判有效，但 App 地图**仍然没有绿色轨迹**。

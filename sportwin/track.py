@@ -506,6 +506,7 @@ def build_record(
     sel_distance: int,
     sel_runtime: int,
     policy: int = 1,
+    address: str = "",
     run_area_id: int = -1,
     fences_raw: Optional[list] = None,
     calorie: Optional[int] = None,
@@ -556,7 +557,7 @@ def build_record(
     speed_b, step_b = buckets(gps, duration_s, steps, start_ms, distance_m,
                               random.Random(seed if seed is not None else int(time.time() * 1000)))
     all_loc = json.dumps(gps, ensure_ascii=False, separators=(",", ":"))
-    five_raw = json.dumps([_checkpoint_payload(c) for c in checkpoints],
+    five_raw = json.dumps([_checkpoint_payload(c, start_ms, i) for i, c in enumerate(checkpoints)],
                           ensure_ascii=False, separators=(",", ":")) if checkpoints else "[]"
     if sport_type == 1:
         envelope = {"useZip": False, "fivePointJson": five_raw,
@@ -571,8 +572,9 @@ def build_record(
     step_json = json.dumps(step_b, separators=(",", ":"))
 
     body = {
-        "address": "",
-        "allLocJson": all_loc,
+        # 真实抓包：地址填城市名；轨迹/分桶数据只走 OBS，body 里必须为空
+        "address": str(address or ""),
+        "allLocJson": "",
         "avgPower": avg_power,
         "avgStepFreq": avg_step,
         "calorie": calorie,
@@ -584,25 +586,25 @@ def build_record(
         "getPrize": False,
         "goalId": 0,
         "isUpload": False,
-        "latitude": gps[0]["gLat"],
-        "longitude": gps[0]["gLng"],
+        "latitude": 0.0,
+        "longitude": 0.0,
         "maxRunTime": 0,
         "minSteps": 0,
         "originalSign": protocol.canonical(sign_map),
         "policy": int(policy),
-        "recordUrl": "",
+        "more": True,
         "roomId": 0,
-        "segmentJson": "[]",
+        "segmentJson": "",
         "selDistance": int(sel_distance),
         "selRunTime": int(sel_runtime),
         "selectedUnid": int(unid),
         "signature": protocol.sport_signature(sign_map),
         "speed": speed_val,
-        "speedPerTenSec": speed_b,
+        "speedPerTenSec": [],
         "sportType": int(sport_type),
         "startTime": int(start_ms),
         "status": 1,
-        "stepsPerTenSec": step_b,
+        "stepsPerTenSec": [],
         "stopTime": int(stop_ms),
         "themeId": -1,
         "totalAscent": 0,
@@ -636,11 +638,21 @@ def build_record(
     return body, obs_payload, object_key
 
 
-def _checkpoint_payload(cp: dict) -> dict:
-    out = {k: v for k, v in cp.items() if k not in ("glat", "glon", "glng")}
-    out.setdefault("isPass", True)
-    out.setdefault("isFixed", 1)
-    return out
+def _checkpoint_payload(cp: dict, start_ms: int = 0, index: int = 0) -> dict:
+    """真实客户端打卡点结构（11 字段，双坐标 + flag/state）。"""
+    return {
+        "flag": int(cp.get("flag") or start_ms),
+        "glat": float(cp.get("glat") if cp.get("glat") is not None else cp.get("lat")),
+        "glon": float(cp.get("glon") if cp.get("glon") is not None else cp.get("lng", cp.get("lon"))),
+        "id": int(cp.get("id") or (100 + index)),
+        "isFixed": int(cp.get("isFixed") or 0),
+        "isPass": True,
+        "lat": float(cp.get("lat")),
+        "lon": float(cp.get("lon", cp.get("lng"))),
+        "pointName": str(cp.get("pointName") or cp.get("name") or ("打卡点%d" % (index + 1))),
+        "position": int(cp.get("position") if cp.get("position") is not None else index),
+        "state": 0,
+    }
 
 
 # ---------------------------------------------------------------------------

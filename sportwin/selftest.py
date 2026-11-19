@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import base64
+import gzip
 import json
 import math
 import time
@@ -213,12 +215,24 @@ def run() -> bool:
         distance_m=int(round(tr.distance_m)), duration_s=tr.duration_s, steps=tr.steps,
         start_ms=0, stop_ms=tr.duration_s * 1000, gps=gps,
         checkpoints=cps, route_vertices=tr.path, sel_distance=2000, sel_runtime=600, seed=7)
-    check("allLocJson 为 27 字段", set(json.loads(body["allLocJson"])[0].keys()) == set(track.CLIENT_POINT_KEYS))
+    # 真实抓包：body 里轨迹/分桶必须为空，数据只走 OBS
+    check("body.allLocJson 为空", body["allLocJson"] == "")
+    check("body 分桶为空", body["speedPerTenSec"] == [] and body["stepsPerTenSec"] == [])
+    check("body 含 more 且无 recordUrl", ("more" in body) and ("recordUrl" not in body))
+    check("body 经纬度为 0.0", body["latitude"] == 0.0 and body["longitude"] == 0.0)
+    _rd = json.loads(gzip.decompress(base64.b64decode(obs["run_data"])).decode("utf-8"))
+    check("OBS run_data 为 27 字段", set(_rd[0].keys()) == set(track.CLIENT_POINT_KEYS), len(_rd))
+    _fp = json.loads(json.loads(body["fivePointJson"])["fivePointJson"])
+    check("fivePointJson 打卡点 11 字段",
+          set(_fp[0].keys()) == {"flag","glat","glon","id","isFixed","isPass","lat","lon",
+                                 "pointName","position","state"}, sorted(_fp[0].keys()))
     check("signature 32 位", len(body["signature"]) == 32, body["signature"])
     check("originalSign 31 字段", body["originalSign"].count("&") == 30,
           body["originalSign"].count("&") + 1)
-    bd = [b["distance"] for b in body["speedPerTenSec"]]
-    bs = [b["stepsNum"] for b in body["stepsPerTenSec"]]
+    _spb = json.loads(gzip.decompress(base64.b64decode(obs["speed_json"])).decode("utf-8"))
+    _stb = json.loads(gzip.decompress(base64.b64decode(obs["step_freq_json"])).decode("utf-8"))
+    bd = [b["distance"] for b in _spb]
+    bs = [b["stepsNum"] for b in _stb]
     mean_d = sum(bd) / len(bd)
     sd_d = (sum((x - mean_d) ** 2 for x in bd) / len(bd)) ** 0.5
     check("分桶距离汇总=总里程", abs(sum(bd) - int(round(tr.distance_m))) <= 1.0, sum(bd))
@@ -289,7 +303,7 @@ def run() -> bool:
         r.run_cfg = cfg["run"]
         r.account_key = "selftest"
         r.report = Report(ok=False, status="init")
-        rep = r.run(dry=True)
+        rep = r.run(dry=True, force=True)
         check("dry-run 成功", rep.ok and rep.status == "dry", rep.message)
         check("dryrun.json 落盘", (store.BASE_DIR / "dryrun.json").exists())
 
@@ -300,7 +314,7 @@ def run() -> bool:
         r2.run_cfg = cfg["run"]
         r2.account_key = "selftest"
         r2.report = Report(ok=False, status="init")
-        rep2 = r2.run(dry=False, poll_sec=10)
+        rep2 = r2.run(dry=False, force=True, poll_sec=10)
         check("真实提交并核验", rep2.ok and rep2.status == "done", rep2.message)
         check("rrid 回填", rep2.rrid == r2.client.rrid, rep2.rrid)
         check("提交体已生成", isinstance(r2.client.saved, dict) and "signature" in r2.client.saved)
@@ -321,7 +335,7 @@ def run() -> bool:
         r3.run_cfg = cfg2["run"]
         r3.account_key = "selftest"
         r3.report = Report(ok=False, status="init")
-        rep3 = r3.run(dry=True)
+        rep3 = r3.run(dry=True, force=True)
         check("严格校规 dry-run 成功", rep3.ok, rep3.message)
         check("里程≥学校下限", rep3.distance_m >= 2000, "%.0fm" % rep3.distance_m)
         check("用时≥minRunTime", rep3.duration_s >= 900, "%ds" % rep3.duration_s)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -12,12 +13,22 @@ from .client import SportError
 from .runner import AuthRequired, Runner, format_verify, verify_now
 
 
+def open_log_dir() -> None:
+    path = str(store.LOG_DIR)
+    if sys.platform.startswith("win"):
+        subprocess.Popen(["explorer", path])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
 def launch() -> None:
     cfg = store.load_config()
     log = store.Logger(echo=False)
 
     root = tk.Tk()
-    root.title("运动世界校园 · 一键跑步（纯 Windows）")
+    root.title("运动世界校园 · 一键跑步")
     root.geometry("820x700")
     root.minsize(720, 600)
 
@@ -259,7 +270,7 @@ def launch() -> None:
     verify_btn.configure(command=lambda: do_verify(False))
     dry_btn.configure(command=lambda: do_run(True))
     st_btn.configure(command=refresh)
-    log_btn.configure(command=lambda: subprocess.Popen(["explorer", str(store.LOG_DIR)]))
+    log_btn.configure(command=open_log_dir)
 
     root.after(200, refresh)
     root.after(600, lambda: do_verify(silent=True))

@@ -61,6 +61,14 @@ DEFAULT_DEVICE = {
     "deviceName": "Android Device",
     "osVersion": "13",
     "User-Agent": "okhttp/4.12.0",
+    # 真实客户端还会带这些设备参数（缺了容易被判"APP参数异常"）
+    "IMEI": "",
+    "androidId": "",
+    "blMac": "",
+    "wifiMac": "",
+    "CustomDeviceId": "",
+    "appInstallTime": "0",
+    "appUpdateTime": "0",
 }
 
 

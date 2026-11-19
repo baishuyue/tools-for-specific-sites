@@ -317,6 +317,26 @@ v3.1 起完全按真实结构生成（示例）：
 - `type`：5 起点 / 0 普通 / 2 打卡点（只标 5 个）/ 7 停顿 / 6 终点；
 - `totalDis` 逐点累加；末点才写 `totalTime/validTime`。
 
+## 5.98 人工复核提示 "APP参数数据异常" 是什么
+
+这是**管理员人工复核**给出的结论（不是模型自动判的），意思是**提交的报文参数结构和真实客户端不一致**，
+常见于以下 7 处（v3.3.0 已全部对齐真实抓包）：
+
+| 字段 | 真实客户端 | 之前的我们 |
+|---|---|---|
+| `more` | `true` | 缺失 |
+| `recordUrl` | 不存在 | 多余字段 |
+| `allLocJson` | `""`（轨迹只进 OBS） | 整段数组 |
+| `speedPerTenSec` / `stepsPerTenSec` | `[]`（进 OBS 的 speed_json / step_freq_json） | 完整数组 |
+| `segmentJson` | `""` | `"[]"` |
+| `latitude` / `longitude` | `0.0` | 首点真实坐标 |
+| `fivePointJson` 内层打卡点 | **11 字段**（`flag`/`glat`/`glon`/`lat`/`lon`/`state`/`position` 0 开始/`isFixed` 0） | 9 字段、`lng`、position 从 1 开始 |
+
+另外请求头补齐了 `IMEI`/`androidId`/`blMac`/`wifiMac`/`CustomDeviceId`/`appInstallTime`/`appUpdateTime`。
+
+> `address` 字段真实客户端填的是逆地理城市名（如"东莞市"）。如果你所在学校会核对这一项，
+> 可在 `config.json` 里设置 `run.address = "东莞市"`（默认空字符串）。
+
 ## 6. 排障
 
 | 现象 | 处理 |

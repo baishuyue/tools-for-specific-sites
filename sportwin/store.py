@@ -26,13 +26,19 @@ APP_NAME = "sportwin"
 
 import sys as _sys
 
-if getattr(_sys, "frozen", False):
-    # PyInstaller 单文件：__file__ 在临时解包目录里，配置必须放在 exe 旁边
+_SOURCE_DIR = Path(__file__).resolve().parent.parent
+if os.name != "nt":
+    # Linux 安装到 /usr/lib 后不可在程序目录写配置，遵循 XDG 用户数据目录。
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    BASE_DIR = data_home / APP_NAME
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+elif getattr(_sys, "frozen", False):
+    # Windows PyInstaller 单文件：配置放在 exe 旁边，保留旧版行为。
     BASE_DIR = Path(_sys.executable).resolve().parent
 else:
-    BASE_DIR = Path(__file__).resolve().parent.parent
+    BASE_DIR = _SOURCE_DIR
 
-_BUNDLE_DIR = Path(getattr(_sys, "_MEIPASS", BASE_DIR))
+_BUNDLE_DIR = Path(getattr(_sys, "_MEIPASS", _SOURCE_DIR))
 #: 服务端按中国时间判定（有效时段、日额度重置都在 UTC+8）
 SERVER_TZ = datetime.timezone(datetime.timedelta(hours=8))
 CONFIG_PATH = BASE_DIR / "config.json"
@@ -52,6 +58,8 @@ DEFAULT_CONFIG: dict = {
         "cpuModel": "arm64-v8a",
         "per_account": True,   # 每个账号一套设备指纹（避免"同设备多账号"被关联）
         "appVersion": "7.3.92",# App 版本（协议升级时改这里）
+        "IMEI": "", "androidId": "", "blMac": "", "wifiMac": "",
+        "CustomDeviceId": "", "appInstallTime": "0", "appUpdateTime": "0",
     },
     "run": {
         "sport_type": 1,                    # 1=计分跑（校园考核） 6=自由跑
@@ -66,6 +74,7 @@ DEFAULT_CONFIG: dict = {
         "human_stride_m": [0.65, 1.35],
         "max_runs_per_day": 1,              # 同账号每天最多提交几次
         "allow_frozen": False,              # 服务端下发 freezeRunTime / 无规则时是否强行提交
+        "address": "",                      # 逆地理地址（真实客户端会填城市名，如"东莞市"）
         # ---- 固定值（>0 时覆盖对应随机区间，调试/复现用）----
         "distance_m": 0,
         "duration_sec": 0,
@@ -124,7 +133,19 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
 
 
 def _machine_key() -> bytes:
-    seed = "%s|%s|%s" % (APP_NAME, os.environ.get("USERNAME", "u"), os.environ.get("COMPUTERNAME", "h"))
+    user = (os.environ.get("USER") or os.environ.get("LOGNAME")
+            or os.environ.get("USERNAME") or "u")
+    host = os.environ.get("HOSTNAME") or os.environ.get("COMPUTERNAME") or "h"
+    machine_id = ""
+    if os.name != "nt":
+        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                machine_id = Path(path).read_text(encoding="ascii").strip()
+                if machine_id:
+                    break
+            except OSError:
+                pass
+    seed = "%s|%s|%s|%s" % (APP_NAME, user, host, machine_id)
     return hashlib.sha256(seed.encode("utf-8")).digest()
 
 
